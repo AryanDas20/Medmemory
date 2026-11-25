@@ -279,3 +279,12 @@ MedMemory-AI/
 | `AGENT37_INSTANCE_ID`, `AGENT37_INSTANCE_URL`, `AGENT37_EMBED_URL`, `MAX_UPLOAD_MB` | Optional | `/api/config` | |
 
 **Verify after deploying:** open `https://YOUR-APP.vercel.app/api/health` and `https://YOUR-APP.vercel.app/api/config`. Both must show JSON. If you see "The page could not be found", the backend is not deployed (check Root Directory, then redeploy).
+
+## Google sign-in and guest demo
+
+The sign-in page supports Google sign-in through Firebase Authentication (`GoogleAuthProvider` + `signInWithPopup`). In the Firebase Console, make sure Google is enabled under Authentication → Sign-in method and that your production domain plus `localhost` are listed under Authentication → Settings → Authorized domains. The Firebase web configuration must include `authDomain`.
+
+The **Enter interactive guest demo** option opens an isolated sample workspace with patient, clinician and administration preview pages. It supports temporary profile edits, sample record creation, likes, demo messages, appointment requests, AI-guide prompts and sample review actions. Guest data is held in browser memory only and is discarded when the visitor exits or refreshes; it does not create Firebase users or write to Firestore/Supabase.
+
+The interface palette is based on the attached sage/ivory reference: `#768E7C`, `#B3C7B5`, `#F3EBDE`, and `#D5C7AA`. A theme switch is available on the sign-in page and in the application header, with the selected preference stored locally and synced to the signed-in user's settings when possible.
+
