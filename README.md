@@ -242,7 +242,8 @@ MedMemory-AI/
 ├── public/
 │   ├── index.html
 │   ├── app.css
-│   └── app.js
+│   ├── app.js
+│   └── assets/  # Local profile illustrations
 ├── server/
 │   ├── local.js
 │   ├── firebase.js
@@ -286,9 +287,15 @@ The sign-in page supports Google sign-in through Firebase Authentication (`Googl
 
 The **Enter interactive guest demo** option opens an isolated sample workspace with patient, clinician and administration preview pages. It supports temporary profile edits, sample record creation, likes, demo messages, appointment requests, AI-guide prompts and sample review actions. Guest data is held in browser memory only and is discarded when the visitor exits or refreshes; it does not create Firebase users or write to Firestore/Supabase.
 
-The interface palette is based on the attached sage/ivory reference: `#768E7C`, `#B3C7B5`, `#F3EBDE`, and `#D5C7AA`. A theme switch is available on the sign-in page and in the application header, with the selected preference stored locally and synced to the signed-in user's settings when possible.
+The interface now uses the **Midnight Teal** dark theme and **Cloud Light** light theme. Both are built from coordinated teal, iris and apricot brand accents over accessible neutral surfaces. A theme switch is available on the sign-in page and in the application header, with support for system preference and a saved user preference.
 
 
 ## Agent37 assistant shortcut
 
 MedMemory includes a floating Agent37 assistant shortcut. Configure your hosted instance using the steps in [`docs/AGENT37-INTEGRATION.md`](docs/AGENT37-INTEGRATION.md). The current shortcut opens the hosted Agent37 workspace; it does not automatically share health data or invoke MedMemory actions.
+
+## Refreshed profile and visual system
+
+The profile workspace now includes editable avatar and cover images, username and biography, personal and contact details, emergency contact information, optional health context, clinician credentials for approved clinician accounts, profile-completion guidance, profile previews, and privacy/sharing controls. Public profile images can only be signed for viewing when the owner has enabled public basic-profile visibility; private health uploads remain protected. The guest sandbox uses the same expanded profile layout with temporary sample data.
+
+The refreshed theme uses the Midnight Teal dark palette and Cloud Light palette, with a system-preference option. See [`docs/BRAND-COLOR-SYSTEM.md`](docs/BRAND-COLOR-SYSTEM.md) for the full token values and contrast notes. The new profile illustrations are local assets under `public/assets/` (SVG vectors plus a compressed WebP consultation hero); no external image host is required.

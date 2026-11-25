@@ -165,7 +165,7 @@ router.put('/profile', async (req, res, next) => {
       uid: req.uid, displayName: after.displayName || '', username: after.username || '',
       bio: after.bio || '', avatarPath: after.avatarPath || '', role: req.role,
       specialty: after.specialty || '', qualification: after.qualification || '', hospital: after.hospital || '',
-      city: after.city || '', country: after.country || '', visible: after.profileVisibility === 'public', updatedAt: now()
+      city: after.city || '', country: after.country || '', coverPath: after.coverPath || '', occupation: after.occupation || '', languages: after.languages || '', visible: after.profileVisibility === 'public', updatedAt: now()
     };
     await db().collection('publicProfiles').doc(req.uid).set(publicPatch, { merge: true });
     res.json({ profile: after });
@@ -300,7 +300,12 @@ router.get('/storage/:id/url', async (req, res, next) => {
     const ref = await db().collection('fileRecords').doc(idParam(req.params.id)).get();
     if (!ref.exists) throw fail(404, 'File not found.');
     const file = ref.data();
-    const allowed = file.ownerUid === req.uid || req.role === 'admin' || req.role === 'doctor' && await hasCareAccess(req.uid, file.ownerUid);
+    let publicProfileAsset = false;
+    if (['avatar', 'cover'].includes(file.category)) {
+      const publicProfile = await db().collection('publicProfiles').doc(file.ownerUid).get();
+      publicProfileAsset = publicProfile.exists && publicProfile.data().visible === true;
+    }
+    const allowed = file.ownerUid === req.uid || req.role === 'admin' || req.role === 'doctor' && await hasCareAccess(req.uid, file.ownerUid) || publicProfileAsset;
     if (!allowed) throw fail(403, 'You do not have permission to view this file.');
     res.json({ url: await storage.signedDownload(file.path, 300), expiresIn: 300 });
   } catch (error) { next(error); }
