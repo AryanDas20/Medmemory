@@ -1,0 +1,186 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function admin() { return signedIn() && request.auth.token.role == 'admin'; }
+    function doctor() { return signedIn() && request.auth.token.role == 'doctor'; }
+    function pairLinked(a, b) {
+      return exists(/databases/$(database)/documents/careLinks/$(a + '_' + b))
+        && get(/databases/$(database)/documents/careLinks/$(a + '_' + b)).data.status == 'accepted'
+        || exists(/databases/$(database)/documents/careLinks/$(b + '_' + a))
+        && get(/databases/$(database)/documents/careLinks/$(b + '_' + a)).data.status == 'accepted';
+    }
+    function canReadHealth(patientUid) {
+      return self(patientUid) || admin()
+        || doctor()
+          && get(/databases/$(database)/documents/profiles/$(patientUid)).data.shareWithDoctors == true
+          && pairLinked(patientUid, request.auth.uid);
+    }
+    function messagingAllowed(a, b) {
+      return pairLinked(a, b)
+        && exists(/databases/$(database)/documents/profiles/$(a))
+        && exists(/databases/$(database)/documents/profiles/$(b))
+        && (!('allowMessagesFrom' in get(/databases/$(database)/documents/profiles/$(a)).data)
+          || get(/databases/$(database)/documents/profiles/$(a)).data.allowMessagesFrom != 'nobody')
+        && (!('allowMessagesFrom' in get(/databases/$(database)/documents/profiles/$(b)).data)
+          || get(/databases/$(database)/documents/profiles/$(b)).data.allowMessagesFrom != 'nobody');
+    }
+    function conversationMember(conversationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/conversations/$(conversationId))
+        && get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids.hasAny([request.auth.uid]);
+    }
+    function conversationCanMessage(conversationId) {
+      return conversationMember(conversationId)
+        && get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids.size() == 2
+        && messagingAllowed(
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids[0],
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberUids[1]);
+    }
+
+    // The server (Firebase Admin SDK) creates and updates user records and public-profile mirrors.
+    // The browser reads profiles, but profile mutations go through verified Express routes.
+    match /profiles/{uid} {
+      allow read: if canReadHealth(uid);
+      allow create: if false;
+      // Profile mutations go through the token-verified Express API. The browser
+      // cannot directly rewrite profile or role fields.
+      allow update: if false;
+      allow delete: if false;
+
+      match /{collectionName}/{recordId} {
+        allow read: if canReadHealth(uid)
+          && collectionName != 'aiChats';
+        allow create, update, delete: if self(uid)
+          && collectionName in ['medicalHistory', 'allergies', 'medications', 'symptoms', 'reports', 'labResults', 'aiChats'];
+        allow read: if self(uid) && collectionName == 'aiChats';
+        // A linked clinician may save a consultation draft, but cannot edit the patient's own history.
+        allow create: if collectionName == 'consultations'
+          && (self(uid) || doctor() && canReadHealth(uid));
+        allow update, delete: if self(uid) && collectionName == 'consultations';
+      }
+    }
+
+    match /publicProfiles/{uid} {
+      allow read: if self(uid) || admin() || resource.data.visible == true;
+      allow write: if false;
+    }
+
+    match /userSettings/{uid} {
+      allow read, create, update: if self(uid);
+      allow delete: if false;
+    }
+
+    match /doctorApplications/{uid} {
+      allow read: if self(uid) || admin();
+      allow create: if self(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if admin();
+    }
+
+    match /careRequests/{requestId} {
+      allow read: if signedIn() && (resource.data.patientUid == request.auth.uid
+        || resource.data.doctorUid == request.auth.uid && (doctor() || admin()) || admin());
+      allow create: if signedIn()
+        && request.resource.data.patientUid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && get(/databases/$(database)/documents/publicProfiles/$(request.resource.data.doctorUid)).data.role == 'doctor'
+        && get(/databases/$(database)/documents/publicProfiles/$(request.resource.data.doctorUid)).data.visible == true;
+      allow update: if signedIn()
+        && resource.data.doctorUid == request.auth.uid && doctor()
+        && request.resource.data.patientUid == resource.data.patientUid
+        && request.resource.data.doctorUid == resource.data.doctorUid
+        && request.resource.data.status in ['accepted', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt']);
+      allow delete: if admin();
+    }
+
+    match /careLinks/{linkId} {
+      allow read: if signedIn() && (resource.data.patientUid == request.auth.uid
+        || resource.data.doctorUid == request.auth.uid || admin());
+      allow create: if (doctor() || admin())
+        && request.resource.data.doctorUid == request.auth.uid
+        && request.resource.data.status == 'accepted'
+        && exists(/databases/$(database)/documents/careRequests/$(request.resource.data.patientUid + '_' + request.resource.data.doctorUid))
+        && get(/databases/$(database)/documents/careRequests/$(request.resource.data.patientUid + '_' + request.resource.data.doctorUid)).data.status == 'accepted';
+      allow update: if signedIn()
+        && (resource.data.patientUid == request.auth.uid || resource.data.doctorUid == request.auth.uid || admin())
+        && request.resource.data.patientUid == resource.data.patientUid
+        && request.resource.data.doctorUid == resource.data.doctorUid
+        && request.resource.data.status == 'removed'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'removedAt', 'removedBy']);
+      allow delete: if admin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if signedIn() && (resource.data.patientUid == request.auth.uid
+        || resource.data.doctorUid == request.auth.uid || admin());
+      allow create: if self(request.resource.data.patientUid)
+        && get(/databases/$(database)/documents/publicProfiles/$(request.resource.data.doctorUid)).data.role == 'doctor'
+        && get(/databases/$(database)/documents/publicProfiles/$(request.resource.data.doctorUid)).data.visible == true
+        && request.resource.data.status == 'requested';
+      allow update: if signedIn()
+        && request.resource.data.patientUid == resource.data.patientUid
+        && request.resource.data.doctorUid == resource.data.doctorUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && (admin()
+          || doctor() && resource.data.doctorUid == request.auth.uid
+            && request.resource.data.status in ['booked', 'in_progress', 'completed', 'declined']
+          || resource.data.patientUid == request.auth.uid
+            && resource.data.status in ['requested', 'booked']
+            && request.resource.data.status == 'cancelled');
+      allow delete: if admin();
+    }
+
+    // Only direct patient-clinician conversations are enabled in this version.
+    // Both users must already have an accepted care connection.
+    match /conversations/{conversationId} {
+      allow read: if signedIn() && resource.data.memberUids.hasAny([request.auth.uid]);
+      allow create: if signedIn()
+        && request.resource.data.type == 'direct'
+        && request.resource.data.memberUids.size() == 2
+        && request.resource.data.memberUids.hasAny([request.auth.uid])
+        && messagingAllowed(request.resource.data.memberUids[0], request.resource.data.memberUids[1]);
+      allow update: if conversationCanMessage(conversationId)
+        && resource.data.memberUids.hasAny([request.auth.uid])
+        && request.resource.data.memberUids == resource.data.memberUids
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'updatedAt']);
+      allow delete: if admin();
+
+      match /messages/{messageId} {
+        allow read: if conversationMember(conversationId);
+        allow create: if conversationCanMessage(conversationId)
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['senderUid', 'text', 'attachment', 'createdAt', 'readBy'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 3000;
+        allow update: if conversationMember(conversationId)
+          && request.resource.data.senderUid == resource.data.senderUid
+          && (resource.data.senderUid == request.auth.uid
+            && request.resource.data.text is string && request.resource.data.text.size() <= 3000
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text'])
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'likes'])
+              && (request.resource.data.readBy.hasAny([request.auth.uid]) || ('likes' in request.resource.data && request.resource.data.likes.hasAny([request.auth.uid]))));
+        allow delete: if conversationMember(conversationId)
+          && (resource.data.senderUid == request.auth.uid || admin());
+      }
+    }
+
+    match /notifications/{uid}/items/{itemId} {
+      allow read: if self(uid);
+      allow update: if self(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if admin();
+    }
+
+    // File metadata and signed URLs are issued by the authenticated Express API.
+    match /fileRecords/{fileId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

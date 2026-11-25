@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#020a05">
+  <meta name="description" content="MedMemory AI keeps your health history organised and helps you understand it in simple language.">
+  <title>MedMemory AI · Your health, remembered</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=cabinet-grotesk@700,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23020a05'/%3E%3Cpath d='M5 17h6l2-6 4 11 3-5h7' stroke='%232bff88' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <div id="app" aria-live="polite">
+    <div class="boot-screen"><div class="brand-mark">M<span>+</span></div><div class="boot-line"></div><p>Preparing your health space…</p></div>
+  </div>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
