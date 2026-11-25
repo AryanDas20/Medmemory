@@ -262,7 +262,7 @@ MedMemory-AI/
 
 ## Vercel deployment
 
-**Entry point:** `index.js` (the only one) exports the Express app from `server/local.js`. `app.listen()` only runs when you start it yourself with `npm start`, so Vercel can invoke the exported app as a serverless function. No `vercel.json` is required for current Vercel Express support.
+**Entry points:** `api/index.js` is the explicit Vercel function (`vercel.json` rewrites `/api/*` to it); `index.js` also exports the Express app from `server/local.js`. `app.listen()` only runs when you start it yourself with `npm start`, so Vercel can invoke the exported app as a serverless function. `public/` is served by Vercel's CDN.
 
 **Root Directory (most important setting).** In Vercel -> Project -> Settings -> General -> Root Directory, select the folder that directly contains `package.json` and `index.js`. If you push this ZIP to GitHub with its outer folder (for example `mm_work/`), the Root Directory must be `mm_work`. If you push the *contents* of that folder to the repository root, leave Root Directory empty. A wrong Root Directory makes Vercel deploy only `public/` as static files, and every `/api/*` request then returns Vercel's plain-text "The page could not be found" 404 (the cause of `Unexpected token 'T', "The page c"... is not valid JSON`).
 
