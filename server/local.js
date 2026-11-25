@@ -46,4 +46,8 @@ app.use((error, _req, res, _next) => {
   res.status(status).json({ error: status >= 500 ? 'The request could not be completed. Check server configuration and logs.' : error.message });
 });
 
-app.listen(port, () => console.log(`MedMemory AI running at http://localhost:${port}`));
+if (require.main === module) {
+  app.listen(port, () => console.log(`MedMemory AI running at http://localhost:${port}`));
+}
+
+module.exports = app;
