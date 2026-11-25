@@ -15,12 +15,26 @@ const ICON = {home:'⌂',profile:'◉',health:'✚',reports:'▤',assistant:'✧
 function toast(message, type='success'){ const region=$('#toast-region'); if(!region)return; const el=document.createElement('div');el.className='toast '+(type==='error'?'error':'');el.innerHTML=`<strong>${type==='error'?'Needs attention':'MedMemory AI'}</strong>${esc(message)}`;region.append(el);setTimeout(()=>el.remove(),4200); }
 function cleanSubs(){unsubscribers.forEach(fn=>{try{fn()}catch{}});unsubscribers=[];}
 function listen(ref, cb, errorMessage='Live updates are temporarily unavailable.'){const stop=onSnapshot(ref,s=>cb(s),e=>{console.warn(e);toast(errorMessage,'error')});unsubscribers.push(stop);return stop;}
+async function readJson(response, endpoint){
+  const type=(response.headers.get('content-type')||'').toLowerCase();
+  const text=await response.text();
+  if(!type.includes('json')){
+    const err=new Error(response.status===404||/could not be found|NOT_FOUND|<html/i.test(text)
+      ?`The backend API route ${endpoint} could not be reached (HTTP ${response.status}). Check the Vercel deployment: the Root Directory must be the folder containing package.json, and the Express server must be deployed as the function.`
+      :`The server returned a non-JSON response from ${endpoint} (HTTP ${response.status}).`);
+    err.apiUnreachable=true;err.status=response.status;throw err;
+  }
+  let data;try{data=text?JSON.parse(text):{};}catch{const err=new Error(`The server returned invalid JSON from ${endpoint} (HTTP ${response.status}).`);err.apiUnreachable=true;throw err;}
+  if(!response.ok){const err=new Error(data.error||`Request to ${endpoint} failed (${response.status})`);err.status=response.status;throw err;}
+  return data;
+}
 async function api(path, options={}){
   const token=currentUser ? await currentUser.getIdToken() : '';
   const headers={...(options.headers||{})}; if(token)headers.Authorization=`Bearer ${token}`;
   if(options.body && !(options.body instanceof FormData))headers['Content-Type']='application/json';
-  const response=await fetch(`/api${path}`,{...options,headers,body:options.body && !(options.body instanceof FormData)?JSON.stringify(options.body):options.body});
-  const data=await response.json().catch(()=>({})); if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`);return data;
+  const endpoint=`/api${path}`;
+  const response=await fetch(endpoint,{...options,headers,body:options.body && !(options.body instanceof FormData)?JSON.stringify(options.body):options.body});
+  return readJson(response,endpoint);
 }
 async function loadProfile(){const snap=await getDoc(doc(db,'profiles',currentUser.uid));me=snap.exists()?snap.data():{};role=me.role||'patient';if(me.avatarPath){try{me.avatarUrl=(await api(`/storage/${encodeURIComponent(me.avatarPath)}/url`)).url;}catch{}}if(me.coverPath){try{me.coverUrl=(await api(`/storage/${encodeURIComponent(me.coverPath)}/url`)).url;}catch{}}}
 async function loadPrefs(){const snap=await getDoc(doc(db,'userSettings',currentUser.uid));if(snap.exists())prefs={...prefs,...snap.data()};document.documentElement.dataset.theme=prefs.theme==='light'?'light':'dark';document.documentElement.classList.toggle('reduce-motion',!!prefs.reducedMotion);document.documentElement.classList.toggle('compact',!!prefs.compact);}
@@ -218,5 +232,5 @@ document.addEventListener('keydown',async e=>{if(e.target.id==='global-search'&&
 document.addEventListener('change',async e=>{if(e.target.id==='theme-setting'){prefs.theme=e.target.value;document.documentElement.dataset.theme=prefs.theme==='light'?'light':'dark';}if(e.target.id==='chat-attachment'&&e.target.files?.[0])toast(`Selected ${e.target.files[0].name}. It will upload when you send your message.`);});
 window.addEventListener('hashchange',()=>{activeChat=location.hash.split('/')[1]||null;refresh().catch(e=>toast(e.message,'error'));});
 
-async function boot(){try{const response=await fetch('/api/config');config=await response.json();const c=config.firebase||{};if(!c.apiKey||!c.projectId||!c.appId){appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>Connect your Firebase project</h2><p>Set your Firebase web app values in the server environment as described in README.md. This project does not use a .env file.</p><p class="muted">No demo login is included.</p></main>`;return;}fbApp=initializeApp(c);auth=getAuth(fbApp);db=getFirestore(fbApp);onAuthStateChanged(auth,async user=>{currentUser=user;if(!user){me=null;cleanSubs();authView('login');return;}try{let bootData=await api('/bootstrap',{method:'POST',body:{}});if(bootData.refreshToken)await user.getIdToken(true);await loadProfile();await refresh();}catch(e){console.error(e);appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>We could not load your account</h2><p>${esc(e.message)}</p><button class="btn" data-action="reload">Try again</button></main>`;}});}catch(e){console.error(e);appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>MedMemory could not start</h2><p>${esc(e.message)}</p><p class="muted">Check the server is running and reload the page.</p></main>`;}}
+async function boot(){try{const response=await fetch('/api/config');config=await readJson(response,'/api/config');const c=config.firebase||{};if(!c.apiKey||!c.projectId||!c.appId){appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>Connect your Firebase project</h2><p>Set your Firebase web app values in the server environment as described in README.md. This project does not use a .env file.</p><p class="muted">No demo login is included.</p></main>`;return;}fbApp=initializeApp(c);auth=getAuth(fbApp);db=getFirestore(fbApp);onAuthStateChanged(auth,async user=>{currentUser=user;if(!user){me=null;cleanSubs();authView('login');return;}try{let bootData=await api('/bootstrap',{method:'POST',body:{}});if(bootData.refreshToken)await user.getIdToken(true);await loadProfile();await refresh();}catch(e){console.error(e);appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>We could not load your account</h2><p>${esc(e.message)}</p><button class="btn" data-action="reload">Try again</button></main>`;}});}catch(e){console.error(e);appRoot.innerHTML=`<main class="boot-screen"><div class="brand-mark">M+</div><h2>MedMemory could not start</h2><p>${esc(e.message)}</p><p class="muted">Check the server is running and reload the page.</p></main>`;}}
 boot();

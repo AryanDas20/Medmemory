@@ -38,7 +38,7 @@ app.use('/api', buildRouter());
 app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
 const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir, { extensions: ['html'], index: 'index.html', maxAge: '1h' }));
-app.get(/.*/, (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+app.get(/.*/, (_req, res, next) => res.sendFile(path.join(publicDir, 'index.html'), err => { if (err) next(err); }));
 
 app.use((error, _req, res, _next) => {
   console.error('[MedMemory API]', error.message);

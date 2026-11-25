@@ -259,3 +259,23 @@ MedMemory-AI/
 ├── .gitignore
 └── package.json
 ```
+
+## Vercel deployment
+
+**Entry point:** `index.js` (the only one) exports the Express app from `server/local.js`. `app.listen()` only runs when you start it yourself with `npm start`, so Vercel can invoke the exported app as a serverless function. No `vercel.json` is required for current Vercel Express support.
+
+**Root Directory (most important setting).** In Vercel -> Project -> Settings -> General -> Root Directory, select the folder that directly contains `package.json` and `index.js`. If you push this ZIP to GitHub with its outer folder (for example `mm_work/`), the Root Directory must be `mm_work`. If you push the *contents* of that folder to the repository root, leave Root Directory empty. A wrong Root Directory makes Vercel deploy only `public/` as static files, and every `/api/*` request then returns Vercel's plain-text "The page could not be found" 404 (the cause of `Unexpected token 'T', "The page c"... is not valid JSON`).
+
+**Environment variables** (Vercel -> Settings -> Environment Variables, then redeploy):
+
+| Variable | Required | Used by | Notes |
+|---|---|---|---|
+| `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_APP_ID` | Yes | Frontend config via `/api/config` | Firebase web config (public by design) |
+| `FIREBASE_MESSAGING_SENDER_ID` | Optional | Frontend config | |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` **or** `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` | Yes | Server only | Firebase Admin; never exposed to the browser |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Yes for uploads | Server only | Private storage bucket |
+| `SUPABASE_BUCKET` | Optional | Server only | See `docs/SUPABASE-STORAGE-SETUP.md` |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); `GEMINI_MODEL` optional | Optional | Server only | Without it the AI runs rules-only |
+| `AGENT37_INSTANCE_ID`, `AGENT37_INSTANCE_URL`, `AGENT37_EMBED_URL`, `MAX_UPLOAD_MB` | Optional | `/api/config` | |
+
+**Verify after deploying:** open `https://YOUR-APP.vercel.app/api/health` and `https://YOUR-APP.vercel.app/api/config`. Both must show JSON. If you see "The page could not be found", the backend is not deployed (check Root Directory, then redeploy).
