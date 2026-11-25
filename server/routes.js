@@ -5,6 +5,7 @@ const multer = require('multer');
 const { db, auth, fieldValue } = require('./firebase');
 const ai = require('./ai');
 const storage = require('./storage');
+const agent37 = require('./agent37');
 
 const router = express.Router();
 const upload = multer({
@@ -86,6 +87,7 @@ async function hasCareAccess(doctorUid, patientUid) {
 function mapRole(role) { return ['patient', 'doctor', 'admin'].includes(role) ? role : 'patient'; }
 
 router.get('/config', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({
     firebase: {
       apiKey: process.env.FIREBASE_API_KEY || '',
@@ -94,17 +96,99 @@ router.get('/config', (_req, res) => {
       appId: process.env.FIREBASE_APP_ID || '',
       messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || ''
     },
-    agent37: {
-      instanceId: process.env.AGENT37_INSTANCE_ID || '',
-      instanceUrl: process.env.AGENT37_INSTANCE_URL || (process.env.AGENT37_INSTANCE_ID ? `https://${process.env.AGENT37_INSTANCE_ID}.agent37.app` : ''),
-      embedUrl: process.env.AGENT37_EMBED_URL || ''
-    },
+    agent37: agent37.publicConfig(),
     uploadLimitMb: Number(process.env.MAX_UPLOAD_MB || 12)
   });
 });
-router.get('/health', (_req, res) => res.json({ ok: true, firebaseAdminConfigured: !!process.env.FIREBASE_SERVICE_ACCOUNT_JSON || !!(process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY), supabaseStorageConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY), ai: ai.aiOn() ? 'gemini' : 'rules-only' }));
+router.get('/health', (_req, res) => res.json({ ok: true, firebaseAdminConfigured: !!process.env.FIREBASE_SERVICE_ACCOUNT_JSON || !!(process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY), supabaseStorageConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY), agent37ChatConfigured: agent37.publicConfig().chatEnabled, ai: ai.aiOn() ? 'gemini' : 'rules-only' }));
 
 router.use(verifyAuth);
+
+// A Firestore transaction makes this account-level limit consistent across
+// concurrent Vercel function instances (an in-memory limiter would not).
+async function enforceAgent37RateLimit(uid) {
+  const ref = db().collection('agent37RateLimits').doc(uid);
+  const currentTime = Date.now();
+  const windowMs = 60_000;
+  const limit = 12;
+  await db().runTransaction(async transaction => {
+    const snapshot = await transaction.get(ref);
+    const stored = snapshot.exists ? snapshot.data() : {};
+    const previousStart = Number(stored.windowStart) || 0;
+    const activeWindow = currentTime - previousStart < windowMs;
+    const count = activeWindow ? Number(stored.count) || 0 : 0;
+    if (count >= limit) throw fail(429, 'You have sent several Agent37 messages. Please wait a minute before trying again.');
+    transaction.set(ref, {
+      uid,
+      windowStart: activeWindow ? previousStart : currentTime,
+      count: count + 1,
+      updatedAt: now()
+    });
+  });
+}
+
+router.post('/agent37/chat', async (req, res, next) => {
+  try {
+    if (req.body?.consentAccepted !== true) throw fail(403, 'Acknowledge the Agent37 data-sharing notice before sending.');
+    const rawMessage = String(req.body?.message ?? '');
+    if (rawMessage.length > 1500) throw fail(400, 'Please keep each message under 1,500 characters.');
+    const message = cleanText(rawMessage, 1500);
+    if (!message) throw fail(400, 'Please enter a message.');
+
+    await enforceAgent37RateLimit(req.uid);
+    const config = agent37.getConfig();
+    const sessionRef = db().collection('agent37Sessions').doc(req.uid);
+    const sessionSnap = await sessionRef.get();
+    const stored = sessionSnap.exists ? sessionSnap.data() : {};
+    const sessionId = stored.instanceId === config.instanceId ? stored.sessionId : null;
+    const result = await agent37.sendMessage(message, sessionId);
+
+    await sessionRef.set({
+      uid: req.uid,
+      instanceId: config.instanceId,
+      sessionId: result.sessionId,
+      updatedAt: now(),
+      consentVersion: 'agent37-cloud-chat-v1',
+      consentAcknowledgedAt: now(),
+      ...(stored.createdAt ? {} : { createdAt: now() })
+    }, { merge: true });
+
+    res.set('Cache-Control', 'no-store');
+    res.json({ message: result.message, sessionId: result.sessionId });
+  } catch (error) { next(error); }
+});
+
+router.get('/agent37/history', async (req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const config = agent37.getConfig();
+    const sessionSnap = await db().collection('agent37Sessions').doc(req.uid).get();
+    if (!sessionSnap.exists || sessionSnap.data().instanceId !== config.instanceId) return res.json({ messages: [] });
+    const sessionId = sessionSnap.data().sessionId;
+    const messages = await agent37.readHistory(sessionId);
+    res.json({ messages });
+  } catch (error) { next(error); }
+});
+
+router.delete('/agent37/session', async (req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const ref = db().collection('agent37Sessions').doc(req.uid);
+    const snap = await ref.get();
+    let transcriptDeleted = true;
+    if (snap.exists) {
+      const stored = snap.data();
+      const config = agent37.getConfig();
+      if (stored.sessionId && stored.instanceId === config.instanceId) {
+        await agent37.deleteSession(stored.sessionId);
+      } else if (stored.sessionId) {
+        transcriptDeleted = false;
+      }
+      await ref.delete();
+    }
+    res.json({ ok: true, transcriptDeleted });
+  } catch (error) { next(error); }
+});
 
 router.post('/bootstrap', async (req, res, next) => {
   try {
@@ -416,6 +500,25 @@ router.delete('/account/delete', async (req, res, next) => {
       try { await storage.removePrivate(file.data().path); } catch (e) { console.warn('File cleanup needs review:', e.message); }
       await file.ref.delete();
     }
+    // Best-effort removal of the user's external Agent37 transcript before deleting
+    // the private session pointer. Account deletion must not be blocked by an outage.
+    let agent37SessionCleanup = true;
+    const agent37SessionRef = db().collection('agent37Sessions').doc(uid);
+    const agent37SessionSnap = await agent37SessionRef.get();
+    if (agent37SessionSnap.exists) {
+      try {
+        const storedSession = agent37SessionSnap.data();
+        const config = agent37.getConfig();
+        if (storedSession.sessionId && storedSession.instanceId === config.instanceId) {
+          await agent37.deleteSession(storedSession.sessionId);
+        } else if (storedSession.sessionId) {
+          agent37SessionCleanup = false;
+        }
+      } catch (error) {
+        agent37SessionCleanup = false;
+        console.warn('Agent37 transcript cleanup needs review:', error.message);
+      }
+    }
     // Remove the user's messages from conversations and remove their membership.
     const conversations = await db().collection('conversations').where('memberUids', 'array-contains', uid).get();
     for (const conversation of conversations.docs) {
@@ -423,7 +526,7 @@ router.delete('/account/delete', async (req, res, next) => {
       for (const message of messages.docs) await message.ref.delete();
       await conversation.ref.delete();
     }
-    for (const name of ['profiles', 'publicProfiles', 'userSettings', 'doctorApplications', 'notifications', 'careLinks', 'careRequests']) {
+    for (const name of ['profiles', 'publicProfiles', 'userSettings', 'doctorApplications', 'notifications', 'careLinks', 'careRequests', 'agent37Sessions', 'agent37RateLimits']) {
       const ref = db().collection(name).doc(uid);
       await db().recursiveDelete(ref).catch(() => ref.delete());
     }
@@ -440,7 +543,7 @@ router.delete('/account/delete', async (req, res, next) => {
       for (const snap of [asPatient, asDoctor]) for (const d of snap.docs) await d.ref.delete();
     }
     await auth().deleteUser(uid);
-    res.json({ ok: true });
+    res.json({ ok: true, agent37SessionCleanup });
   } catch (error) { next(error); }
 });
 

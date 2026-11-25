@@ -12,6 +12,7 @@ const appRoot = $('#app');
 let fbApp, auth, db, currentUser=null, me=null, role='patient', config={}, activeChat=null, unsubscribers=[], activeSetting='profile', searchTerm='';
 let firebaseConfigured=false, guestMode=false, guestDemo=null;
 let notifCount=0, prefs={theme:localStorage.getItem('mm-theme')||'dark',reducedMotion:false,compact:false,readReceipts:true,emailNotifications:false,pushNotifications:false,quietHours:false};
+let agent37Messages=[], agent37Busy=false, agent37Consent=false;
 const ICON = {home:'⌂',profile:'◉',health:'✚',reports:'▤',assistant:'✧',appointments:'▦',care:'♡',messages:'▣',notifications:'◌',patients:'♧',settings:'⚙',logout:'↗'};
 function toast(message, type='success'){ const region=$('#toast-region'); if(!region)return; const el=document.createElement('div');el.className='toast '+(type==='error'?'error':'');el.innerHTML=`<strong>${type==='error'?'Needs attention':'MedMemory AI'}</strong>${esc(message)}`;region.append(el);setTimeout(()=>el.remove(),4200); }
 function cleanSubs(){unsubscribers.forEach(fn=>{try{fn()}catch{}});unsubscribers=[];}
@@ -212,10 +213,72 @@ async function saveSettings(){const patch={...prefs};const theme=$('#theme-setti
 async function verifyEmail(){await sendEmailVerification(currentUser);toast('Verification email sent. Check your inbox.');}
 async function changePassword(){const old=prompt('Enter your current password to confirm your identity:');if(!old)return;const next=prompt('Enter a new password (at least 8 characters):');if(!next)return;if(next.length<8)throw new Error('Use at least 8 characters for your new password.');const cred=EmailAuthProvider.credential(currentUser.email,old);await reauthenticateWithCredential(currentUser,cred);await updatePassword(currentUser,next);toast('Your password was changed.');}
 async function revokeSessions(){if(!confirm('Sign out other devices? Your account may need to sign in again everywhere.'))return;await api('/account/revoke-sessions',{method:'POST'});await signOut(auth);toast('Other sessions were revoked. Please sign in again.');}
-async function deleteAccount(){const word=prompt('This permanently deletes your MedMemory account and associated application data. Type DELETE to continue:');if(word!=='DELETE')return;await api('/account/delete',{method:'DELETE'});await signOut(auth);toast('Account deletion request completed.');}
+async function deleteAccount(){const word=prompt('This permanently deletes your MedMemory account and associated application data. Type DELETE to continue:');if(word!=='DELETE')return;const result=await api('/account/delete',{method:'DELETE'});await signOut(auth);toast(result.agent37SessionCleanup===false?'Account deleted, but Agent37 transcript deletion could not be confirmed. Contact support to review it.':'Account deletion request completed.');}
 async function exportData(){const data=await api('/export');const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`medmemory-export-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);toast('Your data export has been downloaded.');}
 async function openStoredFile(id){if(!id)throw new Error('No file is attached to this record.');const {url}=await api(`/storage/${encodeURIComponent(id)}/url`);window.open(url,'_blank','noopener,noreferrer');}
-async function agent37(){if(!config.agent37?.instanceUrl){modal('Connect your Agent37 instance','The Agent37 quick-access button is ready. Add your own instance details to connect it.',`<div class="notice">Open <a class="inline-link" href="https://www.agent37.com/personal" target="_blank" rel="noopener">Agent37 Personal</a>, choose or open your agent, and copy its instance ID and HTTPS URL. In Vercel, open your MedMemory project → Settings → Environment Variables and add <code>AGENT37_INSTANCE_ID</code> and <code>AGENT37_INSTANCE_URL</code>. Redeploy after saving.</div><p class="muted">The current integration opens your hosted Agent37 agent. It does not send MedMemory records to Agent37 or let it change patient data.</p><div class="notice warn">Do not place an Agent37 API key in frontend code. For a future in-app chat/API connection, the key must stay in a server-side environment variable and requests must be authorized per user.</div>`,`<button class="btn btn-primary" data-action="close-modal">Got it</button>`);return;}if(config.agent37.embedUrl){modal('Agent37 assistant','Your hosted Agent37 workspace. Avoid entering identifiable patient details unless you have approved that data flow.',`<iframe class="agent37-frame" src="${esc(config.agent37.embedUrl)}" title="Agent37 assistant" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>`,`<button class="btn btn-ghost" data-action="close-modal">Close</button><button class="btn btn-primary" data-action="open-agent37-external">Open in new tab ↗</button>`);return;}window.open(config.agent37.instanceUrl,'_blank','noopener,noreferrer');}
+function agent37MessageMarkup(item){
+ const roleName=item.role==='user'?'You':item.role==='error'?'Connection issue':'Agent37';
+ const content=esc(item.content||'').replace(/\n/g,'<br>');
+ const stamp=item.createdAt?new Date(item.createdAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
+ return `<article class="agent37-bubble ${item.role==='user'?'user':''} ${item.role==='error'?'error':''}"><div class="agent37-bubble-head"><strong>${roleName}</strong>${stamp?`<time>${esc(stamp)}</time>`:''}</div><p>${content}</p></article>`;
+}
+function renderAgent37Messages(){
+ const feed=$('#agent37-messages');if(!feed)return;
+ feed.innerHTML=agent37Messages.length?agent37Messages.map(agent37MessageMarkup).join(''):`<div class="agent37-empty"><div class="agent37-empty-icon">✧</div><strong>Start a new conversation</strong><p>Ask a general question or get help organising a task. Only the text you type is sent to Agent37.</p></div>`;
+ if(agent37Busy)feed.insertAdjacentHTML('beforeend','<div class="agent37-typing" role="status"><i></i><i></i><i></i><span>Agent37 is thinking…</span></div>');
+ feed.scrollTop=feed.scrollHeight;
+}
+async function agent37(){
+ if(!config.agent37?.chatEnabled){
+  modal('Connect Agent37 Cloud API','The in-app assistant is ready. Add the Cloud API credentials as server-only environment variables, then redeploy.',
+   `<div class="agent37-setup"><img src="/assets/profile-consultation.webp" alt="Illustration of a patient talking with a doctor"/><div><h4>One secure connection</h4><p>Get an API key from <a class="inline-link" href="https://www.agent37.com/dashboard/cloud/api-keys" target="_blank" rel="noopener noreferrer">Agent37 Cloud API Keys ↗</a>, then add these variables in Vercel → Settings → Environment Variables:</p></div></div><div class="agent37-env-list"><code>AGENT37_API_KEY</code><code>AGENT37_INSTANCE_ID</code><code>AGENT37_INSTANCE_URL</code></div><p class="muted">The instance URL must be the standard HTTPS URL for the same 10-character instance ID. Never add the API key to <code>public/app.js</code>, HTML, or a <code>NEXT_PUBLIC_</code> variable. Redeploy after adding the values.</p><div class="notice warn">Only messages you explicitly type will be sent. MedMemory does not attach profiles, medical records, reports, medicines, or uploaded files. This deployment shares one Agent37 instance across MedMemory accounts, so use it only for general, non-identifying assistance. Do not send PHI or identifying health details. Agent37 agents may also have browsing, terminal, file and connected-tool capabilities; configure the instance with least privilege and no sensitive connected accounts.</div>`,
+   `<button class="btn btn-primary" data-action="close-modal">Got it</button>`);
+  return;
+ }
+ agent37Messages=[];agent37Busy=false;agent37Consent=false;
+ modal('Agent37 assistant','Your connected AI agent, securely accessed through the MedMemory backend.',
+  `<div class="agent37-chat-layout"><div class="agent37-welcome"><img src="/assets/profile-consultation.webp" alt="Illustration of a patient speaking with a clinician"/><div><span class="eyebrow">AGENT37 · SECURE CHAT</span><strong>How can I help today?</strong><p>A separate AI workspace for general questions, explanations and organisation.</p></div><span class="pill green">API configured</span></div><div class="notice warn agent37-privacy-note"><strong>Privacy reminder:</strong> only the text you type below is sent to Agent37. No MedMemory profile, medical record, report, medicine list or attachment is automatically shared. This deployment uses one Agent37 instance across MedMemory accounts, so use general, non-identifying messages only—never PHI or patient identifiers. Agent37 may have browsing, terminal, file and connected-tool access; its instance must be configured with least privilege.</div><div id="agent37-messages" class="agent37-messages" role="log" aria-live="polite" aria-relevant="additions text"></div><label class="agent37-consent"><input id="agent37-consent" type="checkbox"><span>I understand that my typed messages are sent to Agent37, an external AI service. Saved MedMemory records are not attached automatically.</span></label><form id="agent37-chat-form" class="agent37-compose"><textarea class="textarea" name="message" rows="2" maxlength="1500" placeholder="Message Agent37…" required></textarea><button class="btn btn-primary agent37-send" type="submit" disabled>Send <span aria-hidden="true">↑</span></button></form><div class="agent37-footnote">AI-generated information can be incorrect. This assistant does not diagnose, prescribe or replace a qualified clinician. For urgent symptoms, seek medical care.</div></div>`,
+  `<button class="btn btn-ghost" data-action="agent37-new-chat">New chat</button>${config.agent37.instanceUrl?`<a class="btn btn-ghost" href="${esc(config.agent37.instanceUrl)}" target="_blank" rel="noopener noreferrer">Open Agent37 ↗</a>`:''}<button class="btn btn-primary" data-action="close-modal">Close</button>`);
+ $('#active-modal .modal')?.classList.add('agent37-chat-modal');
+ renderAgent37Messages();
+ try{
+  const result=await api('/agent37/history');
+  agent37Messages=Array.isArray(result.messages)?result.messages:[];
+  renderAgent37Messages();
+ }catch(error){
+  console.warn('Agent37 history could not be loaded:',error.message);
+  if(error.status!==404)toast('Could not restore the previous Agent37 conversation. You can still start a new chat.','error');
+ }
+}
+async function sendAgent37Message(form){
+ if(agent37Busy)return;
+ if(!$('#agent37-consent')?.checked){toast('Please acknowledge the Agent37 data-sharing notice before sending.','error');return;}
+ const input=form.elements.message;const message=String(input.value||'').trim();
+ if(!message)return;
+ if(message.length>1500){toast('Please keep your message under 1,500 characters.','error');return;}
+ agent37Messages.push({role:'user',content:message,createdAt:Date.now()});
+ input.value='';agent37Busy=true;renderAgent37Messages();
+ const sendButton=$('.agent37-send',form);if(sendButton)sendButton.disabled=true;
+ try{
+  const result=await api('/agent37/chat',{method:'POST',body:{message,consentAccepted:true}});
+  agent37Messages.push({role:'assistant',content:result.message||'Agent37 returned an empty response.',createdAt:Date.now()});
+ }catch(error){
+  agent37Messages.push({role:'error',content:error.message||'Could not reach Agent37. Please try again.',createdAt:Date.now()});
+  toast(error.message||'Agent37 could not respond.','error');
+ }finally{
+  agent37Busy=false;renderAgent37Messages();
+  if(sendButton)sendButton.disabled=!$('#agent37-consent')?.checked;
+  input.focus();
+ }
+}
+async function newAgent37Chat(){
+ if(agent37Busy){toast('Wait for the current Agent37 response to finish.','error');return;}
+ if(!confirm('Start a new Agent37 conversation? The current Agent37 transcript for this account will be deleted.'))return;
+ try{
+  const result=await api('/agent37/session',{method:'DELETE'});
+  agent37Messages=[];renderAgent37Messages();toast(result.transcriptDeleted===false?'Local session reset. The previous transcript could not be deleted because the Agent37 instance configuration changed.':'New Agent37 conversation started.');
+ }catch(error){toast(error.message||'Could not reset the Agent37 conversation.','error');}
+}
 function applyDoctorModal(){modal('Apply for clinician access','Clinician accounts need manual administrator verification. Enter your professional registration details accurately.',`<form id="doctor-application-form"><div class="form-grid">${field('Full name *','fullName',me.displayName||'','text','required')}${field('Specialty *','specialty','','text','required')}${field('Qualification *','qualification','','text','required')}${field('Medical registration number *','registrationNumber','','text','required')}${field('Hospital / clinic','hospital','')}${field('Years of experience','experienceYears','','number','min="0"')}${field('Contact phone','phone',me.phone||'','tel')}</div>${textareaField('Additional verification details','notes','','')}</form>`,`<button class="btn btn-ghost" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="submit-doctor-application">Submit for review</button>`);}
 async function submitDoctorApplication(form){const body=Object.fromEntries(new FormData(form).entries());const res=await api('/doctor/apply',{method:'POST',body});closeModal();toast('Your clinician application is pending administrator review.');}
 async function openMedicineCheck(){modal('Medicine context check','This check uses your saved allergy and medication information. It is not a prescription or interaction database.',`<form id="medicine-form">${field('Medicine name','medicine','','text','required placeholder="Enter the medicine name"')}</form><div id="medicine-result"></div>`,`<button class="btn btn-ghost" data-action="close-modal">Close</button><button class="btn btn-primary" data-action="run-medicine-check">Check context</button>`);}
@@ -307,6 +370,7 @@ document.addEventListener('click',async e=>{
   else if(a==='export-data')await exportData();
   else if(a==='open-file')await openStoredFile(actionEl.dataset.id);
   else if(a==='agent37')await agent37();
+  else if(a==='agent37-new-chat')await newAgent37Chat();
   else if(a==='open-agent37-external'){window.open(config.agent37?.instanceUrl,'_blank','noopener,noreferrer');closeModal();}
   else if(a==='patient-detail')await patientDetail(actionEl.dataset.uid);
   else if(a==='start-consultation')await startConsultation(actionEl.dataset.uid);
@@ -336,7 +400,8 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('submit',async e=>{const form=e.target;if(!form.matches('form'))return;e.preventDefault();try{
  if(guestMode&&submitGuestForm(form))return;
- if(form.id==='auth-form'){const submit=$('button[type=submit]',form);submit.disabled=true;try{await submitAuth(form);}finally{submit.disabled=false;}}
+ if(form.id==='agent37-chat-form')await sendAgent37Message(form);
+ else if(form.id==='auth-form'){const submit=$('button[type=submit]',form);submit.disabled=true;try{await submitAuth(form);}finally{submit.disabled=false;}}
  else if(form.id==='profile-form')await submitProfile(form);
  else if(form.id==='record-form')await saveRecord(form.dataset.kind,form);
  else if(form.id==='report-form')await submitReport(form);
@@ -349,6 +414,7 @@ document.addEventListener('submit',async e=>{const form=e.target;if(!form.matche
  else if(form.id==='medicine-form')await runMedicineCheck(form);
  }catch(err){console.error(err);toast(err.message||'Could not complete that action.','error');}
 });
+document.addEventListener('change',e=>{if(e.target.id==='agent37-consent'){const button=$('.agent37-send');if(button&&!agent37Busy)button.disabled=!e.target.checked;}});
 document.addEventListener('keydown',async e=>{if(e.target.id==='global-search'&&e.key==='Enter'){searchTerm=e.target.value.trim();location.hash='#search';}});
 document.addEventListener('change',async e=>{if(e.target.id==='theme-setting'){prefs.theme=e.target.value;localStorage.setItem('mm-theme',prefs.theme);applyTheme(prefs.theme);}if(e.target.id==='chat-attachment'&&e.target.files?.[0])toast(`Selected ${e.target.files[0].name}. It will upload when you send your message.`);});
 window.addEventListener('hashchange',()=>{activeChat=location.hash.split('/')[1]||null;refresh().catch(e=>toast(e.message,'error'));});

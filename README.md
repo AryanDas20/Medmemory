@@ -12,7 +12,7 @@ MedMemory AI is a patient-health organiser and clinician collaboration workspace
 | Application database | Cloud Firestore | Profiles, medical records, appointments, care connections, messages and notifications |
 | File storage | Supabase Storage | Private reports, profile photos, cover photos and chat attachments |
 | AI | Gemini API (optional) | Report extraction, health explanations, medicine context and clinician summaries |
-| Agent integration | Agent37 personal agent (optional) | Opens the user's own Agent37 instance in a separate tab |
+| Agent integration | Agent37 Cloud API (optional) | Authenticated in-app assistant through a server-side proxy; API key stays private |
 
 ## 2. Run locally on macOS
 
@@ -68,7 +68,9 @@ export FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ~/Downloads/medmemory-service-accoun
 export SUPABASE_URL="https://your-project.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="your-private-service-role-secret"
 export GEMINI_API_KEY="your-gemini-key"
-export AGENT37_INSTANCE_ID="your-agent37-instance-id"
+export AGENT37_API_KEY="sk_live_your-agent37-cloud-key"
+export AGENT37_INSTANCE_ID="abcdefgh12"
+export AGENT37_INSTANCE_URL="https://abcdefgh12.agent37.app"
 npm start
 ```
 
@@ -111,17 +113,15 @@ Without a key, the built-in safety/rule layer still powers basic health chat and
 
 AI is not a diagnosis or a prescription. Review all outputs and extracted report values against the original document. Do not use the system for emergency decisions.
 
-## 6. Agent37 setup (optional)
+## 6. Agent37 Cloud API setup (optional)
 
-Follow the Hackyard instructions you supplied:
+MedMemory includes an in-app Agent37 assistant that calls Agent37 through authenticated Express/Vercel API routes. Follow [`docs/AGENT37-INTEGRATION.md`](docs/AGENT37-INTEGRATION.md) for the complete secure setup. In summary:
 
-1. Go to [agent37.com/personal](https://agent37.com/personal) — not the API/Cloud Sandbox page.
-2. Select **Start free** and create the personal agent. The free personal flow described by Hackyard does not require entering card details.
-3. Copy the instance ID from the Agent37 dashboard.
-4. Set it as the server-side `AGENT37_INSTANCE_ID` value. The app uses the standard `https://INSTANCE_ID.agent37.app` address unless you provide a dashboard URL in `AGENT37_INSTANCE_URL`.
-5. Restart the server. The Agent37 button opens the external agent in a separate tab.
+1. Create a Cloud API key at [Agent37 Cloud API Keys](https://www.agent37.com/dashboard/cloud/api-keys) and copy the instance ID.
+2. Add `AGENT37_API_KEY`, `AGENT37_INSTANCE_ID`, and `AGENT37_INSTANCE_URL` in Vercel's server-only Environment Variables. Never expose the API key through a `NEXT_PUBLIC_`/`VITE_` variable or frontend file.
+3. Redeploy, sign in to MedMemory, open the Agent37 assistant, and acknowledge the data-sharing notice before sending a test message.
 
-This is a safe launch integration, not a claim that Agent37 has access to MedMemory's Firebase data. **No patient profile, report, conversation or health record is automatically sent to Agent37.** Do not paste identifying health data into another service unless you have assessed and authorised that data sharing. Do not use an API key or card details from the Cloud Sandbox page for this setup.
+Only the text explicitly typed into the Agent37 chat is forwarded. MedMemory does not automatically send profiles, patient records, reports, medicines, lab results, saved chats, or attachments. The current configuration shares one Agent37 instance across MedMemory accounts; use it only for general non-identifying assistance unless you separately validate tenant isolation and obtain the necessary privacy/security approvals. Agent37 may browse, run code, use a terminal, read/write files and call connected tools depending on the instance template, so configure it with least privilege and no sensitive connected accounts. Do not send patient-identifiable health information or PHI through this shared instance.
 
 ## 7. Feature guide
 
@@ -277,7 +277,9 @@ MedMemory-AI/
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Yes for uploads | Server only | Private storage bucket |
 | `SUPABASE_BUCKET` | Optional | Server only | See `docs/SUPABASE-STORAGE-SETUP.md` |
 | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); `GEMINI_MODEL` optional | Optional | Server only | Without it the AI runs rules-only |
-| `AGENT37_INSTANCE_ID`, `AGENT37_INSTANCE_URL`, `AGENT37_EMBED_URL`, `MAX_UPLOAD_MB` | Optional | `/api/config` | |
+| `AGENT37_API_KEY`, `AGENT37_INSTANCE_ID` | Optional | Server-only Agent37 proxy | Required together to enable in-app chat; never exposed to frontend |
+| `AGENT37_INSTANCE_URL` | Optional | Server-only Agent37 proxy | Defaults to `https://{INSTANCE_ID}.agent37.app`; if set, must match the ID |
+| `MAX_UPLOAD_MB` | Optional | Server | Upload file size limit |
 
 **Verify after deploying:** open `https://YOUR-APP.vercel.app/api/health` and `https://YOUR-APP.vercel.app/api/config`. Both must show JSON. If you see "The page could not be found", the backend is not deployed (check Root Directory, then redeploy).
 
@@ -290,9 +292,9 @@ The **Enter interactive guest demo** option opens an isolated sample workspace w
 The interface now uses the **Midnight Teal** dark theme and **Cloud Light** light theme. Both are built from coordinated teal, iris and apricot brand accents over accessible neutral surfaces. A theme switch is available on the sign-in page and in the application header, with support for system preference and a saved user preference.
 
 
-## Agent37 assistant shortcut
+## Agent37 assistant
 
-MedMemory includes a floating Agent37 assistant shortcut. Configure your hosted instance using the steps in [`docs/AGENT37-INTEGRATION.md`](docs/AGENT37-INTEGRATION.md). The current shortcut opens the hosted Agent37 workspace; it does not automatically share health data or invoke MedMemory actions.
+MedMemory includes a floating, authenticated Agent37 chat interface. Firebase ID tokens are checked by the backend; the Agent37 Cloud key remains server-side; and a separate Agent37 session ID is stored privately for each signed-in Firebase account. The chat forwards only the message typed by the user—no records, profile, files or saved health context are attached. See [`docs/AGENT37-INTEGRATION.md`](docs/AGENT37-INTEGRATION.md) for setup, deployment and the important shared-instance privacy limitation.
 
 ## Refreshed profile and visual system
 

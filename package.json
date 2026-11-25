@@ -2,7 +2,7 @@
   "name": "medmemory-ai",
   "version": "2.0.0",
   "private": true,
-  "description": "MedMemory AI — vanilla JavaScript healthcare platform with Firebase backend and private Supabase file storage",
+  "description": "MedMemory AI \u2014 vanilla JavaScript healthcare platform with Firebase backend and private Supabase file storage",
   "type": "commonjs",
   "engines": {
     "node": ">=20"
@@ -11,7 +11,7 @@
     "start": "node server/local.js",
     "dev": "node --watch server/local.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check --input-type=module < public/app.js && node --check index.js && node --check api/index.js && node --check server/local.js && node --check server/routes.js && node --check server/firebase.js && node --check server/storage.js"
+    "check": "node --check --input-type=module < public/app.js && node --check index.js && node --check api/index.js && node --check server/local.js && node --check server/routes.js && node --check server/agent37.js && node --check server/firebase.js && node --check server/storage.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

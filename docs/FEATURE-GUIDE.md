@@ -40,4 +40,4 @@
 
 ## Agent37
 
-The Agent37 button opens the personal agent configured in the server environment. It is kept separate from patient records. MedMemory does not send a patient's private information to the external agent automatically.
+The Agent37 button opens an in-app assistant. The browser sends the typed message and Firebase ID token to MedMemory's backend; the backend calls the configured Agent37 instance using the private Cloud API key. Each Firebase account has a server-managed conversation session and can load or delete its own transcript. Only explicitly typed text is forwarded—MedMemory records, reports, medicines, profile fields, saved chats and attachments are never added automatically. The current Agent37 instance is shared across accounts, so keep use general and non-identifying until tenant-level isolation and healthcare privacy approvals have been independently validated. See `AGENT37-INTEGRATION.md`.

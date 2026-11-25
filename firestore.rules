@@ -72,6 +72,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Agent37 session identifiers are managed only by the authenticated backend.
+    // The browser cannot read, overwrite, or enumerate another user's session id.
+    match /agent37Sessions/{uid} {
+      allow read, write: if false;
+    }
+    match /agent37RateLimits/{uid} {
+      allow read, write: if false;
+    }
+
     match /doctorApplications/{uid} {
       allow read: if self(uid) || admin();
       allow create: if self(uid)
