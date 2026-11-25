@@ -288,3 +288,7 @@ The **Enter interactive guest demo** option opens an isolated sample workspace w
 
 The interface palette is based on the attached sage/ivory reference: `#768E7C`, `#B3C7B5`, `#F3EBDE`, and `#D5C7AA`. A theme switch is available on the sign-in page and in the application header, with the selected preference stored locally and synced to the signed-in user's settings when possible.
 
+
+## Agent37 assistant shortcut
+
+MedMemory includes a floating Agent37 assistant shortcut. Configure your hosted instance using the steps in [`docs/AGENT37-INTEGRATION.md`](docs/AGENT37-INTEGRATION.md). The current shortcut opens the hosted Agent37 workspace; it does not automatically share health data or invoke MedMemory actions.
