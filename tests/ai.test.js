@@ -36,6 +36,7 @@ test('urgent symptom phrases set the emergency flag', async () => {
   const result = await ai.chat('I have chest pain and sweating. I cannot breathe properly.', emptyRecord(), []);
   assert.equal(result.meta.red_flag, true);
   assert.equal(result.meta.urgency, 'emergency');
+  assert.equal(typeof result.meta.red_flag_reason, 'string');
 });
 
 test('health guide returns a rules response when the Gemini key is unavailable', async () => {
@@ -48,6 +49,8 @@ test('health guide returns a rules response when the Gemini key is unavailable',
     assert.ok(result.content.length > 0, 'The guide should always return a helpful fallback response');
     assert.equal(result.meta.engine, 'rules');
     assert.ok(Array.isArray(result.meta.follow_up_questions));
+    assert.equal(Object.hasOwn(result.meta, 'red_flag_reason'), false, 'non-emergency metadata must omit the optional reason');
+    assert.equal(result.meta.fallback, true, 'rule-based responses must be identified as a fallback');
   } finally {
     if (previousGemini === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = previousGemini;

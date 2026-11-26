@@ -23,6 +23,18 @@ const safeName = value => String(value || '').trim().replace(/[<>\u0000-\u001f]/
 const cleanText = (value, max = 1500) => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max);
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const toArray = snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// Firestore rejects undefined anywhere in a document. Recursively omit undefined
+// object properties and use null for undefined array slots without altering
+// meaningful values or Firestore-native objects.
+function sanitizeFirestoreData(value) {
+  if (Array.isArray(value)) return value.map(item => item === undefined ? null : sanitizeFirestoreData(item));
+  if (!value || typeof value !== 'object' || value instanceof Date || Buffer.isBuffer(value)) return value;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, item]) => item !== undefined)
+    .map(([key, item]) => [key, sanitizeFirestoreData(item)]));
+}
 
 async function verifyAuth(req, _res, next) {
   try {
@@ -310,7 +322,7 @@ router.post('/ai/chat', requireRole('patient', 'doctor', 'admin'), async (req, r
     const ref = db().collection('profiles').doc(req.uid).collection('aiChats');
     const batch = db().batch();
     batch.set(ref.doc(), { role: 'user', content: message, createdAt: now() });
-    batch.set(ref.doc(), { role: 'assistant', content: result.content, meta: result.meta, createdAt: now() });
+    batch.set(ref.doc(), sanitizeFirestoreData({ role: 'assistant', content: result.content, meta: result.meta, createdAt: now() }));
     await batch.commit();
     res.json(result);
   } catch (error) { next(error); }
@@ -325,14 +337,14 @@ router.post('/ai/medicine-check', requireRole('patient'), async (req, res, next)
 router.post('/ai/doctor-brief/:patientUid', requireRole('doctor', 'admin'), async (req, res, next) => {
   try {
     const patientUid = idParam(req.params.patientUid);
-    if (req.role !== 'admin' && !(await hasCareAccess(req.uid, patientUid))) throw fail(403, 'This patient has not shared their medical record with you.');
+    if (!(await hasCareAccess(req.uid, patientUid))) throw fail(403, 'This patient has not shared their medical record with you.');
     res.json(await ai.brief(await buildRecord(patientUid), cleanText(req.body.reason, 300)));
   } catch (error) { next(error); }
 });
 router.post('/ai/consultation-summary/:patientUid', requireRole('doctor', 'admin'), async (req, res, next) => {
   try {
     const patientUid = idParam(req.params.patientUid);
-    if (req.role !== 'admin' && !(await hasCareAccess(req.uid, patientUid))) throw fail(403, 'This patient has not shared their medical record with you.');
+    if (!(await hasCareAccess(req.uid, patientUid))) throw fail(403, 'This patient has not shared their medical record with you.');
     const notes = cleanText(req.body.notes, 6000);
     if (!notes) throw fail(400, 'Add consultation notes before generating a summary.');
     const result = await ai.consultSummary({ notes, diagnosis: cleanText(req.body.diagnosis, 1000), prescription: cleanText(req.body.prescription, 2000), follow_up_date: req.body.followUpDate || null, reason: cleanText(req.body.reason, 500) }, [], await buildRecord(patientUid));
@@ -390,7 +402,7 @@ router.get('/storage/:id/url', async (req, res, next) => {
       const publicProfile = await db().collection('publicProfiles').doc(file.ownerUid).get();
       publicProfileAsset = publicProfile.exists && publicProfile.data().visible === true;
     }
-    const allowed = file.ownerUid === req.uid || req.role === 'admin' || req.role === 'doctor' && await hasCareAccess(req.uid, file.ownerUid) || publicProfileAsset;
+    const allowed = file.ownerUid === req.uid || req.role === 'doctor' && await hasCareAccess(req.uid, file.ownerUid) || publicProfileAsset;
     if (!allowed) throw fail(403, 'You do not have permission to view this file.');
     res.json({ url: await storage.signedDownload(file.path, 300), expiresIn: 300 });
   } catch (error) { next(error); }
@@ -453,11 +465,8 @@ router.post('/notify', async (req, res, next) => {
 
 router.get('/doctor/patients', requireRole('doctor', 'admin'), async (req, res, next) => {
   try {
-    if (req.role === 'admin') {
-      const snap = await db().collection('profiles').where('role', '==', 'patient').limit(100).get();
-      const patients = snap.docs.map(d => ({ uid: d.id, profile: d.data() }));
-      return res.json(patients);
-    }
+    // Admin privileges do not imply access to private patient records. Only
+    // explicitly accepted care links are included for the signed-in clinician.
     const links = await db().collection('careLinks').where('doctorUid', '==', req.uid).where('status', '==', 'accepted').get();
     const uids = new Set(links.docs.map(d => d.data().patientUid));
     const patients = await Promise.all([...uids].map(async uid => {

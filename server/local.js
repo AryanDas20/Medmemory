@@ -2,7 +2,7 @@
 const path = require('node:path');
 const express = require('express');
 const helmet = require('helmet');
-const { rateLimit } = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { initFirebase } = require('./firebase');
 const { buildRouter } = require('./routes');
 
@@ -10,6 +10,11 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 
 app.disable('x-powered-by');
+// Vercel terminates the public connection and forwards the client address
+// to this function. Trust exactly the platform ingress hop, not arbitrary
+// proxy chains supplied by clients.
+if (process.env.VERCEL) app.set('trust proxy', 1);
+
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
@@ -29,7 +34,15 @@ app.use(helmet({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-app.use('/api', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  // Use Express's resolved client IP (which honors the one trusted Vercel hop).
+  // ipKeyGenerator preserves correct IPv6 subnet handling.
+  keyGenerator: req => ipKeyGenerator(req.ip || req.socket?.remoteAddress || 'unknown')
+}));
 
 try { initFirebase(); }
 catch (error) { console.warn('[MedMemory] Firebase Admin will initialize when configured:', error.message); }

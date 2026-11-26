@@ -169,10 +169,10 @@ async function chat(msg, rec, history) {
   rec.trends.forEach(t => { if (new RegExp(t.test.split(' ')[0], 'i').test(msg)) used.add(`${t.test} report`); });
   const meta = {
     urgency: flag ? 'emergency' : (['low', 'medium', 'high', 'emergency'].includes(out.urgency) ? out.urgency : 'low'),
-    red_flag: !!flag, red_flag_reason: flag || undefined,
+    red_flag: !!flag, ...(flag ? { red_flag_reason: flag } : {}),
     record_items_used: [...used].slice(0, 6), conflicts_avoided: [...new Set([...guard, ...(out.ai_conflicts || [])])].slice(0, 6),
     suggested_checkups: out.suggested_checkups.slice(0, 5), specialty: out.specialty, follow_up_questions: out.follow_up_questions,
-    engine,
+    engine, fallback: engine !== 'gemini',
   };
   const content = flag ? `${flag} Please do not wait: call 112 or go to the nearest emergency department now. ${out.reply ? '' : ''}`.trim() : out.reply;
   return { content, meta };
