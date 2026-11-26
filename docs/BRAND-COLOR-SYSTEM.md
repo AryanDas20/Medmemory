@@ -35,48 +35,48 @@ MedMemory AI now uses a calm, optimistic healthcare palette built around **teal*
 | Error | `#FF7893` |
 | Information | `#71BDFF` |
 
-## Cloud light — light theme
+## Twilight teal — light appearance (dark-toned)
 
 | Role | Value |
 | --- | --- |
-| Primary | `#087F8C` |
-| Primary strong | `#066B78` |
-| Primary soft | `#087F8C1C` (11% opacity) |
-| Secondary / iris | `#6759D7` |
-| Secondary soft | `#6759D71B` (10.5% opacity) |
-| Accent / apricot | `#A75C15` |
-| Accent soft | `#A75C151C` (11% opacity) |
-| Background | `#F4F7FC` |
-| Soft background | `#EAF0F8` |
-| Surface | `#FFFFFF` |
-| Elevated surface | `#F8FAFE` |
-| Card | `#FFFFFF` |
-| Primary text | `#17263B` |
-| Secondary text | `#40536C` |
-| Muted text | `#5A6B82` |
-| Border / divider | `#53698B2E` (18% opacity) |
-| Strong border | `#53698B54` (33% opacity) |
-| Hover surface | `#087F8C13` (7.5% opacity) |
-| Active surface | `#087F8C1F` (12% opacity) |
-| Focus | `#087F8C` |
-| Disabled | `#A4B0C1` |
-| Chart series 1–5 | `#087F8C`, `#6759D7`, `#B86B1D`, `#216EA8`, `#BE5D88` |
-| Success | `#087C59` |
-| Warning | `#99600E` |
-| Error | `#BD3D5A` |
-| Information | `#216EA8` |
+| Primary | `#35D0BA` |
+| Primary strong | `#10AFA2` |
+| Primary soft | `#35D0BA24` (14% opacity) |
+| Secondary / iris | `#9387FF` |
+| Secondary soft | `#9387FF26` (15% opacity) |
+| Accent / apricot | `#FFB86B` |
+| Accent soft | `#FFB86B24` (14% opacity) |
+| Background | `#111A2B` |
+| Soft background | `#17243A` |
+| Surface | `#1A2941` |
+| Elevated surface | `#22334F` |
+| Card | `#1D2C45` |
+| Primary text | `#F5F7FF` |
+| Secondary text | `#C1CBE0` |
+| Muted text | `#9AA9C2` |
+| Border / divider | `#A3B5D530` (19% opacity) |
+| Strong border | `#A3B5D55C` (36% opacity) |
+| Hover surface | `#35D0BA1C` (11% opacity) |
+| Active surface | `#35D0BA2E` (18% opacity) |
+| Focus | `#55D9C6` |
+| Disabled | `#66758D` |
+| Chart series 1–5 | `#35D0BA`, `#9387FF`, `#FFB86B`, `#71BDFF`, `#F28DB7` |
+| Success | `#43D6A2` |
+| Warning | `#FFC66D` |
+| Error | `#FF7893` |
+| Information | `#71BDFF` |
 
 ## Gradient guidance
 
-- Dark primary action: `#10AFA2` → `#35D0BA`; light primary action: `#066B78` → `#087F8C`.
-- Accent action: `#9387FF` → `#B4A9FF` in dark mode; the light theme uses the same iris accent over a light surface.
+- Midnight and Twilight primary actions: `#10AFA2` → `#35D0BA`.
+- Accent action: `#9387FF` → `#B4A9FF` in both appearance settings, over dark navy surfaces.
 - Hero background: `#152B40` → `#252750` → `#3A315F`, with restrained teal and iris radial highlights.
 - Card surfaces use the theme's surface and elevated-surface tokens rather than one-off gradients.
 - Status colors are reserved for status communication; labels and text remain present so meaning is not conveyed by color alone.
 
 ## Accessibility notes
 
-The selected light-theme text accents were checked against white surfaces: primary teal is approximately 4.75:1, iris is approximately 5.27:1, apricot is approximately 5.02:1, muted text on the soft background is approximately 4.75:1, success is approximately 5.20:1, and danger is approximately 5.28:1. Dark-theme primary text on the midnight background is approximately 17.5:1; muted text on a dark card is approximately 5.7:1. Keyboard focus uses a visible 3px outline. Reduced-motion preferences continue to disable decorative animations.
+Both appearance settings use dark-toned navy surfaces and the same high-contrast teal, iris and apricot accents; the light appearance uses a subtly brighter slate-navy surface scale rather than white cards. Keyboard focus uses a visible 3px outline. Reduced-motion preferences continue to disable decorative animations.
 
 The palette is centralized in CSS custom properties near the end of `public/app.css`. Existing page components consume semantic aliases such as `--bg`, `--panel`, `--text`, `--muted`, `--neon`, `--red`, `--amber` and `--blue` to keep legacy screens consistent with the refreshed system.
 

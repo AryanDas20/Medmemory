@@ -43,18 +43,20 @@ function idParam(value) {
   return text;
 }
 
-async function readSubcollection(uid, name, limit = 100) {
-  const snap = await db().collection('profiles').doc(uid).collection(name).orderBy('createdAt', 'desc').limit(limit).get().catch(async () => db().collection('profiles').doc(uid).collection(name).limit(limit).get());
+async function readSubcollection(uid, name, limit = 60) {
+  const ref = db().collection('profiles').doc(uid).collection(name);
+  const snap = await ref.orderBy('createdAt', 'desc').limit(limit).get().catch(() => ref.limit(limit).get());
   return toArray(snap);
 }
-async function buildRecord(uid) {
-  const profileSnap = await db().collection('profiles').doc(uid).get();
-  const profile = profileSnap.exists ? profileSnap.data() : {};
-  const [history, allergies, medications, symptoms, reports, labs] = await Promise.all([
+async function buildRecord(uid, identity = null) {
+  const [profileSnap, history, allergies, medications, symptoms, reports, labs, u] = await Promise.all([
+    db().collection('profiles').doc(uid).get(),
     readSubcollection(uid, 'medicalHistory'), readSubcollection(uid, 'allergies'),
     readSubcollection(uid, 'medications'), readSubcollection(uid, 'symptoms'),
-    readSubcollection(uid, 'reports'), readSubcollection(uid, 'labResults')
+    readSubcollection(uid, 'reports'), readSubcollection(uid, 'labResults'),
+    identity ? Promise.resolve(identity) : auth().getUser(uid)
   ]);
+  const profile = profileSnap.exists ? profileSnap.data() : {};
   const trendMap = new Map();
   labs.forEach(lab => {
     const name = lab.test_name || lab.testName || 'Lab test';
@@ -67,9 +69,8 @@ async function buildRecord(uid) {
     return { test, unit: latest.unit, normal_range: latest.normal_range, direction: !previous || latest.value === previous.value ? 'flat' : latest.value > previous.value ? 'up' : 'down', change: previous ? latest.value - previous.value : 0, points, previous, latest };
   });
   const age = profile.age || (profile.dateOfBirth ? Math.max(0, Math.floor((Date.now() - new Date(profile.dateOfBirth).getTime()) / 31557600000)) : null);
-  const u = await auth().getUser(uid);
   return {
-    user: { id: uid, name: profile.displayName || u.displayName || 'Patient', email: u.email || '' },
+    user: { id: uid, name: profile.displayName || u.displayName || u.name || u.email?.split('@')[0] || 'Patient', email: u.email || '' },
     profile: { ...profile, age, gender: profile.gender || profile.sexAtBirth || '', blood_group: profile.blood_group || profile.bloodGroup || '' },
     history: history.map(x => ({ ...x, name: x.name || x.condition || x.title || 'Medical history', date: x.date || x.startDate || '' })),
     allergies: allergies.map(x => ({ ...x, allergen: x.allergen || x.name || '' })),
@@ -299,13 +300,13 @@ router.post('/admin/doctors/:uid/reject', requireRole('admin'), async (req, res,
   } catch (error) { next(error); }
 });
 
-router.post('/ai/chat', requireRole('patient'), async (req, res, next) => {
+router.post('/ai/chat', requireRole('patient', 'doctor', 'admin'), async (req, res, next) => {
   try {
     const message = cleanText(req.body.message, 1800);
     if (!message) throw fail(400, 'Please enter a question.');
-    const record = await buildRecord(req.uid);
-    const history = await readSubcollection(req.uid, 'aiChats', 12);
+    const [record, history] = await Promise.all([buildRecord(req.uid, req.identity), readSubcollection(req.uid, 'aiChats', 12)]);
     const result = await ai.chat(message, record, history.map(x => ({ role: x.role, content: x.content })));
+    res.set('Cache-Control', 'no-store');
     const ref = db().collection('profiles').doc(req.uid).collection('aiChats');
     const batch = db().batch();
     batch.set(ref.doc(), { role: 'user', content: message, createdAt: now() });

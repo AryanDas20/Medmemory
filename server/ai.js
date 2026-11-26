@@ -4,7 +4,7 @@ const KEY = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || ''
 const MODEL = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const SPECIALTIES = ['General Physician', 'Orthopaedics', 'Cardiology', 'Endocrinology', 'Dermatology', 'Neurology'];
 
-async function gemini({ system, prompt, parts, json = true }) {
+async function gemini({ system, prompt, parts, json = true, timeoutMs = 16000 }) {
   if (!KEY()) throw new Error('no-key');
   const body = {
     systemInstruction: system ? { parts: [{ text: system }] } : undefined,
@@ -13,7 +13,7 @@ async function gemini({ system, prompt, parts, json = true }) {
   };
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL()}:generateContent`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': KEY() },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(28000),
+    body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
   });
   if (!r.ok) throw new Error('gemini ' + r.status);
   const d = await r.json();
@@ -148,13 +148,18 @@ async function chat(msg, rec, history) {
   const flag = redFlag(msg);
   const guard = conflictGuard(msg, rec);
   let out = null;
+  let engine = 'rules';
   if (aiOn()) {
     try {
       const j = await gemini({
         system: 'You are MedMemory AI, a careful health assistant for Indian patients. Reply in the user\'s language (English or Hinglish). ALWAYS use the patient record. Give safe, general guidance only, never a diagnosis, never prescribe drugs or doses. Never suggest anything that conflicts with the record. Keep the reply under 90 words. Return JSON only: {"reply":string,"urgency":"low|medium|high|emergency","specialty":one of ' + JSON.stringify(SPECIALTIES) + ',"suggested_checkups":string[],"follow_up_questions":string[](max 3),"record_items_used":string[] (names of record items you used),"conflicts_avoided":string[] (things you deliberately did NOT suggest because of the record)}',
-        prompt: `PATIENT RECORD:\n${ctxText(rec)}\n\nRECENT CHAT:\n${history.slice(-6).map(h => h.role + ': ' + h.content).join('\n')}\n\nPATIENT MESSAGE: ${msg}`,
+        prompt: `PATIENT RECORD:\n${ctxText(rec)}\n\nRECENT CHAT:\n${history.slice(0, 6).reverse().map(h => h.role + ': ' + h.content).join('\n')}\n\nPATIENT MESSAGE: ${msg}`,
+        timeoutMs: 6500,
       });
-      out = { reply: String(j.reply || ''), urgency: j.urgency, specialty: SPECIALTIES.includes(j.specialty) ? j.specialty : 'General Physician', suggested_checkups: j.suggested_checkups || [], follow_up_questions: (j.follow_up_questions || []).slice(0, 3), used: j.record_items_used || [], ai_conflicts: j.conflicts_avoided || [] };
+      const reply = String(j.reply || '').trim();
+      if (!reply) throw new Error('Gemini returned an empty reply.');
+      out = { reply, urgency: j.urgency, specialty: SPECIALTIES.includes(j.specialty) ? j.specialty : 'General Physician', suggested_checkups: Array.isArray(j.suggested_checkups) ? j.suggested_checkups : [], follow_up_questions: Array.isArray(j.follow_up_questions) ? j.follow_up_questions.slice(0, 3) : [], used: Array.isArray(j.record_items_used) ? j.record_items_used : [], ai_conflicts: Array.isArray(j.conflicts_avoided) ? j.conflicts_avoided : [] };
+      engine = 'gemini';
     } catch (e) { out = null; }
   }
   if (!out) out = ruleChat(msg, rec);
@@ -167,7 +172,7 @@ async function chat(msg, rec, history) {
     red_flag: !!flag, red_flag_reason: flag || undefined,
     record_items_used: [...used].slice(0, 6), conflicts_avoided: [...new Set([...guard, ...(out.ai_conflicts || [])])].slice(0, 6),
     suggested_checkups: out.suggested_checkups.slice(0, 5), specialty: out.specialty, follow_up_questions: out.follow_up_questions,
-    engine: out.used !== undefined && aiOn() && !out.rule ? 'gemini' : 'rules',
+    engine,
   };
   const content = flag ? `${flag} Please do not wait: call 112 or go to the nearest emergency department now. ${out.reply ? '' : ''}`.trim() : out.reply;
   return { content, meta };

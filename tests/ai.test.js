@@ -37,3 +37,21 @@ test('urgent symptom phrases set the emergency flag', async () => {
   assert.equal(result.meta.red_flag, true);
   assert.equal(result.meta.urgency, 'emergency');
 });
+
+test('health guide returns a rules response when the Gemini key is unavailable', async () => {
+  const previousGemini = process.env.GEMINI_API_KEY;
+  const previousGoogle = process.env.GOOGLE_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.GOOGLE_API_KEY;
+  try {
+    const result = await ai.chat('I have been feeling unwell. What details should I track?', emptyRecord(), []);
+    assert.ok(result.content.length > 0, 'The guide should always return a helpful fallback response');
+    assert.equal(result.meta.engine, 'rules');
+    assert.ok(Array.isArray(result.meta.follow_up_questions));
+  } finally {
+    if (previousGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousGemini;
+    if (previousGoogle === undefined) delete process.env.GOOGLE_API_KEY;
+    else process.env.GOOGLE_API_KEY = previousGoogle;
+  }
+});
